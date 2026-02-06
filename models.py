@@ -139,23 +139,22 @@ class RoPE2D(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads, attn_mask=None, rope_2d_grid_size=None):
+    def __init__(self, dim, heads, rope_2d_grid_size=None):
         super().__init__()
         self.norm = RMSNorm(dim)
         self.heads = heads
         self.qkv = nn.Linear(dim, dim * 3, bias=False)
         self.proj = nn.Linear(dim, dim)
-        self.attn_mask = attn_mask  # optional (N, N) boolean tensor
         self.rope = RoPE2D(dim // heads, rope_2d_grid_size) if rope_2d_grid_size else None
 
-    def forward(self, x):
+    def forward(self, x, attn_mask=None):
         B, N, C = x.shape
         x = self.norm(x)
         qkv = self.qkv(x).reshape(B, N, 3, self.heads, C // self.heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
         if self.rope:
             q, k = self.rope(q, k)
-        x = F.scaled_dot_product_attention(q, k, v, attn_mask=self.attn_mask)
+        x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
         x = x.transpose(1, 2).reshape(B, N, C)
         return self.proj(x)
 

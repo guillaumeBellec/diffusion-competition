@@ -75,20 +75,19 @@ class NCAConfigLarge(ConfigLarge):
     rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
 
 class Block(nn.Module):
-    def __init__(self, dim, heads, attn_mask=None, rope_2d_grid_size=None):
+    def __init__(self, dim, heads, rope_2d_grid_size=None):
         super().__init__()
-        self.attn = Attention(dim, heads, attn_mask=attn_mask, rope_2d_grid_size=rope_2d_grid_size)
+        self.attn = Attention(dim, heads, rope_2d_grid_size=rope_2d_grid_size)
         self.mlp = nn.Sequential(RMSNorm(dim),nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim))
         self.cond_scale1 = nn.Parameter(torch.zeros(dim))
         self.cond_scale2 = nn.Parameter(torch.zeros(dim))
         self.skip_scale = nn.Parameter(torch.ones(1) * 0.1)
 
-    def forward(self, x0, cond):
-        # Option A: attention sees position (in x), conditioning added AFTER
+    def forward(self, x0, cond, attn_mask=None):
         x = x0
-        x = x + self.cond_scale1 * cond  # conditioning after attention, not before
-        x = x + self.attn(x)
-        x = x + self.cond_scale2 * cond  # conditioning after attention, not before
+        x = x + self.cond_scale1 * cond
+        x = x + self.attn(x, attn_mask=attn_mask)
+        x = x + self.cond_scale2 * cond
         x = x + self.mlp(x)
         return x * self.skip_scale + (1-self.skip_scale) * x0
 
@@ -110,11 +109,11 @@ class DiT(nn.Module):
         # Build neighborhood attention mask if configured
         attn_mask = None
         if config.local_attn_dist is not None:
-            mask_np = make_neighborhood_mask(grid_size, config.local_attn_dist)
-            attn_mask = torch.from_numpy(mask_np)
+            attn_mask = torch.from_numpy(make_neighborhood_mask(grid_size, config.local_attn_dist))
+        self.register_buffer('attn_mask', attn_mask, persistent=False)
 
         rope_gs = grid_size if getattr(config, 'rope_2d', False) else None
-        self.blocks = nn.ModuleList([Block(config.dim, config.heads, attn_mask=attn_mask, rope_2d_grid_size=rope_gs) for _ in range(config.depth)])
+        self.blocks = nn.ModuleList([Block(config.dim, config.heads, rope_2d_grid_size=rope_gs) for _ in range(config.depth)])
         self.norm = RMSNorm(config.dim)
         self.out = nn.Linear(config.dim, config.patch_dim)
         nn.init.zeros_(self.out.weight)
@@ -136,8 +135,7 @@ class DiT(nn.Module):
         c_emb = self.class_embed(c)  # [B, dim]
         cond = (t_emb + c_emb).unsqueeze(1)  # [B, 1, dim]
         for block in self.blocks:
-            #x = checkpoint(block, x, cond, use_reentrant=False)
-            x = block(x, cond)
+            x = block(x, cond, attn_mask=self.attn_mask)
         x_pred = self.unpatchify(self.out(self.norm(x)))
 
         return x_pred
