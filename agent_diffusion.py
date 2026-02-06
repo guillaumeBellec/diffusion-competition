@@ -296,9 +296,10 @@ def train(config=None):
     #ema.apply(model)
     torch.save({
         "model": model.state_dict(),
+        "config_name": type(config).__name__,
         "config": {k: v for k, v in vars(config).items() if not k.startswith("_")},
-    }, "diffusion_cifar10.pth")
-    print("Saved: diffusion_cifar10.pth")
+    }, f"diffusion_cifar10_{type(config).__name__}.pth")
+    print(f"Saved: diffusion_cifar10_{type(config).__name__}.pth")
 
     plt.ioff()
     plt.close(fig)
@@ -328,4 +329,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    train()
+    train(Config)
+    train(ConfigLarge)
+    train(NCAConfig)
+    train(NCAConfigLarge)
