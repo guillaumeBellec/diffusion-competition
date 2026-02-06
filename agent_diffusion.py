@@ -53,7 +53,7 @@ class Config:
         return self.patch_size ** 2 * 3 # num pixels x RGB
 
 
-class ConfigLarge(Config):
+class ConfigMedium(Config):
     # Model architecture
     dim = 6 * 128
     depth = 12
@@ -70,7 +70,7 @@ class NCAConfig(Config):
     local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
     rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
 
-class NCAConfigLarge(ConfigLarge):
+class NCAConfigMedium(ConfigMedium):
     local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
     rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
 
@@ -173,7 +173,7 @@ class DiT(nn.Module):
 def train(config=None):
     import matplotlib.pyplot as plt
 
-    config = config or ConfigLarge()
+    config = config or ConfigMedium()
     print(f"Training on {config.device} for {config.epochs} epochs")
 
     tf = transforms.Compose([
@@ -330,6 +330,6 @@ class Agent:
 
 if __name__ == "__main__":
     train(Config())
-    train(ConfigLarge())
+    train(ConfigMedium())
     train(NCAConfig())
-    train(NCAConfigLarge())
+    train(NCAConfigMedium())
