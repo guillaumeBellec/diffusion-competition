@@ -212,7 +212,6 @@ data/
 *.pt
 .idea/
 CLAUDE.md
-test_batch
 diffusion_cifar10/
 agent_template.py
 env_template.py
