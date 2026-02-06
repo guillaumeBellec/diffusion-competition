@@ -60,9 +60,9 @@ class ConfigLarge(Config):
     heads = 6
 
     # Training
-    batch_size = 2056
+    batch_size = 512 * 4
     lr = 1e-4
-    epochs = 300
+    epochs = 300 * 4
     lr_warmup_steps = 1000
     ema_decay = 0.99
 
