@@ -117,10 +117,10 @@ class RMSNorm(nn.Module):
 class RoPE2D(nn.Module):
     """2D Rotary Position Embedding for spatial grids."""
 
-    def __init__(self, head_dim, grid_size):
+    def __init__(self, head_dim, grid_size, base=100.0):
         super().__init__()
         quarter = head_dim // 4
-        freqs = 1.0 / (10000 ** (torch.arange(quarter).float() / quarter))
+        freqs = 1.0 / (base ** (torch.arange(quarter).float() / quarter))
         ys, xs = torch.meshgrid(torch.arange(grid_size), torch.arange(grid_size), indexing='ij')
         # x-frequencies for first half of pairs, y-frequencies for second half
         angles_x = xs.flatten().float()[:, None] * freqs[None, :]  # (N, quarter)
