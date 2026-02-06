@@ -173,7 +173,7 @@ class DiT(nn.Module):
 def train(config=None):
     import matplotlib.pyplot as plt
 
-    config = config or NCAConfigLarge()
+    config = config or ConfigLarge()
     print(f"Training on {config.device} for {config.epochs} epochs")
 
     tf = transforms.Compose([
