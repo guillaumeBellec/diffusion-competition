@@ -23,8 +23,8 @@ def main():
     # Run evaluation
     print("Running evaluation...")
     results = env.evaluate(agents, agent_infos)
-    print("\nEvaluation results:")
-    print(results)
+    fid_score = -results["agent_results"][0]["score"]
+    print(f"\nFID: {fid_score:.2f}")
 
     # Generate and plot 3 sample images
     class_ids = np.array([0, 1, 2], dtype=np.int32)  # airplane, automobile, bird
@@ -42,7 +42,7 @@ def main():
         ax.axis("off")
 
     plt.tight_layout()
-    plt.savefig("sample_images.png")
+    plt.savefig(f"sample_fid_{fid_score:.2f}.png")
     plt.show()
 
 
