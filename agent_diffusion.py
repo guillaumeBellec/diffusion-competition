@@ -175,7 +175,7 @@ class DiT(nn.Module):
 def train(config=None):
     import matplotlib.pyplot as plt
 
-    config = config or Config()
+    config = config or NCAConfigLarge()
     print(f"Training on {config.device} for {config.epochs} epochs")
 
     tf = transforms.Compose([
@@ -310,7 +310,7 @@ def train(config=None):
 class Agent:
     def __init__(self):
         checkpoint = torch.load("diffusion_cifar10.pth", map_location="cpu", weights_only=False)
-        self.config = ConfigLarge()
+        self.config = Config() # load default will be overloaded
         for k, v in checkpoint["config"].items():
             setattr(self.config, k, v)
         self.config.device = "cpu"
