@@ -1,4 +1,4 @@
-# Generative CIFAR-10
+## Generative CIFAR-10
 
 This github is intended to define minimal solution and environment for the generative CIFAR-10 competition.
 This competition implement the standard generative CIFAR-10 benchmark.
