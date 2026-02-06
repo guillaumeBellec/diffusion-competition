@@ -32,8 +32,8 @@ class Config:
     diff_beta_end = 0.02
     diff_sample_steps = 100
 
-    local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
-    rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
+    local_attn_dist = None # Neighborhood attention (None = full attention, int = Chebyshev radius)
+    rope_2d = False # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
 
     # Classifier-Free Guidance
     cfg_drop = 0.1
@@ -66,6 +66,13 @@ class ConfigLarge(Config):
     lr_warmup_steps = 1000
     ema_decay = 0.99
 
+class NCAConfig(Config):
+    local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
+    rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
+
+class NCAConfigLarge(ConfigLarge):
+    local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
+    rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
 
 class Block(nn.Module):
     def __init__(self, dim, heads, attn_mask=None, rope_2d_grid_size=None):
@@ -303,7 +310,7 @@ def train(config=None):
 class Agent:
     def __init__(self):
         checkpoint = torch.load("diffusion_cifar10.pth", map_location="cpu", weights_only=False)
-        self.config = Config()
+        self.config = ConfigLarge()
         for k, v in checkpoint["config"].items():
             setattr(self.config, k, v)
         self.config.device = "cpu"
