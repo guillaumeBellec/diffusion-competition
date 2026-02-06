@@ -329,7 +329,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    train(Config)
-    train(ConfigLarge)
-    train(NCAConfig)
-    train(NCAConfigLarge)
+    train(Config())
+    train(ConfigLarge())
+    train(NCAConfig())
+    train(NCAConfigLarge())
