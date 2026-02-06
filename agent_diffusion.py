@@ -186,7 +186,7 @@ def train(config=None):
 
     loader = DataLoader(
         datasets.CIFAR10("./data", train=True, download=True, transform=tf),
-        batch_size=config.batch_size, shuffle=True, num_workers=4, pin_memory=True, drop_last=True,
+        batch_size=config.batch_size, shuffle=True, num_workers=2, pin_memory=True, drop_last=True,
         persistent_workers=True
     )
 
