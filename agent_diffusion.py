@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from models import Diffusion, SinusoidalEmbedding, RMSNorm, EMA
+from models import Diffusion, SinusoidalEmbedding, RMSNorm, EMA, Attention, make_neighborhood_mask
 from torch.utils.checkpoint import checkpoint
 
 torch.set_float32_matmul_precision('high')
@@ -32,6 +32,9 @@ class Config:
     diff_beta_end = 0.02
     diff_sample_steps = 100
 
+    local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
+    rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
+
     # Classifier-Free Guidance
     cfg_drop = 0.1
     cfg_scale = 2.0
@@ -50,28 +53,24 @@ class Config:
         return self.patch_size ** 2 * 3 # num pixels x RGB
 
 
-class Attention(nn.Module):
-    def __init__(self, dim, heads):
-        super().__init__()
-        self.norm = RMSNorm(dim)
-        self.heads = heads
-        self.qkv = nn.Linear(dim, dim * 3, bias=False)
-        self.proj = nn.Linear(dim, dim)
+class ConfigLarge(Config):
+    # Model architecture
+    dim = 6 * 128
+    depth = 12
+    heads = 6
 
-    def forward(self, x):
-        B, N, C = x.shape
-        x = self.norm(x)
-        qkv = self.qkv(x).view(B, N, 3, self.heads, C // self.heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0) # -> B, N, C
-        x = F.scaled_dot_product_attention(q, k, v)
-        x = x.transpose(1, 2).view(B, N, C)
-        return self.proj(x)
+    # Training
+    batch_size = 2056
+    lr = 1e-4
+    epochs = 300
+    lr_warmup_steps = 1000
+    ema_decay = 0.99
 
 
 class Block(nn.Module):
-    def __init__(self, dim, heads):
+    def __init__(self, dim, heads, attn_mask=None, rope_2d_grid_size=None):
         super().__init__()
-        self.attn = Attention(dim, heads)
+        self.attn = Attention(dim, heads, attn_mask=attn_mask, rope_2d_grid_size=rope_2d_grid_size)
         self.mlp = nn.Sequential(RMSNorm(dim),nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim))
         self.cond_scale1 = nn.Parameter(torch.zeros(dim))
         self.cond_scale2 = nn.Parameter(torch.zeros(dim))
@@ -101,7 +100,14 @@ class DiT(nn.Module):
         self.time_embed = SinusoidalEmbedding(config.dim)
         self.class_embed = nn.Embedding(config.num_classes + 1, config.dim)
 
-        self.blocks = nn.ModuleList([Block(config.dim, config.heads) for _ in range(config.depth)])
+        # Build neighborhood attention mask if configured
+        attn_mask = None
+        if config.local_attn_dist is not None:
+            mask_np = make_neighborhood_mask(grid_size, config.local_attn_dist)
+            attn_mask = torch.from_numpy(mask_np)
+
+        rope_gs = grid_size if getattr(config, 'rope_2d', False) else None
+        self.blocks = nn.ModuleList([Block(config.dim, config.heads, attn_mask=attn_mask, rope_2d_grid_size=rope_gs) for _ in range(config.depth)])
         self.norm = RMSNorm(config.dim)
         self.out = nn.Linear(config.dim, config.patch_dim)
         nn.init.zeros_(self.out.weight)

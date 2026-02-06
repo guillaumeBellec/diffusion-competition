@@ -3,9 +3,25 @@ Shared components for diffusion models.
 """
 
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def make_neighborhood_mask(grid_size=8, radius=1):
+    """Build a binary attention mask for spatial neighborhood filtering.
+
+    For an (grid_size x grid_size) spatial grid, returns a (N, N) boolean mask
+    where mask[i, j] = True iff positions i and j are within `radius` steps
+    (Chebyshev distance) of each other.
+    """
+    N = grid_size * grid_size
+    coords = np.array(np.unravel_index(np.arange(N), (grid_size, grid_size))).T  # (N, 2)
+    # Chebyshev distance between all pairs
+    diff = np.abs(coords[:, None, :] - coords[None, :, :])  # (N, N, 2)
+    dist = diff.max(axis=-1)  # (N, N)
+    return dist <= radius
 
 
 class Diffusion:
@@ -98,20 +114,48 @@ class RMSNorm(nn.Module):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.scale
 
 
+class RoPE2D(nn.Module):
+    """2D Rotary Position Embedding for spatial grids."""
+
+    def __init__(self, head_dim, grid_size):
+        super().__init__()
+        quarter = head_dim // 4
+        freqs = 1.0 / (10000 ** (torch.arange(quarter).float() / quarter))
+        ys, xs = torch.meshgrid(torch.arange(grid_size), torch.arange(grid_size), indexing='ij')
+        # x-frequencies for first half of pairs, y-frequencies for second half
+        angles_x = xs.flatten().float()[:, None] * freqs[None, :]  # (N, quarter)
+        angles_y = ys.flatten().float()[:, None] * freqs[None, :]  # (N, quarter)
+        angles = torch.cat([angles_x, angles_y], dim=-1)  # (N, head_dim//2)
+        self.register_buffer('cos', angles.cos()[None, None])  # (1, 1, N, head_dim//2)
+        self.register_buffer('sin', angles.sin()[None, None])
+
+    def forward(self, q, k):
+        """Apply rotary embeddings to q and k. Shape: (B, heads, N, head_dim)."""
+        def rotate(x):
+            x1, x2 = x[..., ::2], x[..., 1::2]
+            return torch.stack([x1 * self.cos - x2 * self.sin,
+                                x1 * self.sin + x2 * self.cos], dim=-1).flatten(-2)
+        return rotate(q), rotate(k)
+
+
 class Attention(nn.Module):
-    def __init__(self, dim, heads):
+    def __init__(self, dim, heads, attn_mask=None, rope_2d_grid_size=None):
         super().__init__()
         self.norm = RMSNorm(dim)
         self.heads = heads
         self.qkv = nn.Linear(dim, dim * 3, bias=False)
         self.proj = nn.Linear(dim, dim)
+        self.attn_mask = attn_mask  # optional (N, N) boolean tensor
+        self.rope = RoPE2D(dim // heads, rope_2d_grid_size) if rope_2d_grid_size else None
 
     def forward(self, x):
         B, N, C = x.shape
         x = self.norm(x)
         qkv = self.qkv(x).reshape(B, N, 3, self.heads, C // self.heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
-        x = F.scaled_dot_product_attention(q, k, v)
+        if self.rope:
+            q, k = self.rope(q, k)
+        x = F.scaled_dot_product_attention(q, k, v, attn_mask=self.attn_mask)
         x = x.transpose(1, 2).reshape(B, N, C)
         return self.proj(x)
 
