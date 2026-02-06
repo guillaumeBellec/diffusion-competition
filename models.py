@@ -141,7 +141,6 @@ class RoPE2D(nn.Module):
 class Attention(nn.Module):
     def __init__(self, dim, heads, rope_2d_grid_size=None):
         super().__init__()
-        self.norm = RMSNorm(dim)
         self.heads = heads
         self.qkv = nn.Linear(dim, dim * 3, bias=False)
         self.proj = nn.Linear(dim, dim)
@@ -149,7 +148,6 @@ class Attention(nn.Module):
 
     def forward(self, x, attn_mask=None):
         B, N, C = x.shape
-        x = self.norm(x)
         qkv = self.qkv(x).reshape(B, N, 3, self.heads, C // self.heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
         if self.rope:
@@ -157,25 +155,6 @@ class Attention(nn.Module):
         x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
         x = x.transpose(1, 2).reshape(B, N, C)
         return self.proj(x)
-
-
-class DiTBlock(nn.Module):
-    def __init__(self, dim, heads):
-        super().__init__()
-        self.norm1 = RMSNorm(dim)
-        self.attn = Attention(dim, heads)
-        self.norm2 = RMSNorm(dim)
-        self.mlp = nn.Sequential(nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim))
-        self.cond_scale1 = nn.Parameter(torch.zeros(dim))
-        self.cond_scale2 = nn.Parameter(torch.zeros(dim))
-        self.skip_scale = nn.Parameter(torch.ones(1) * 0.1)
-
-    def forward(self, x0, cond):
-        x = x0 + self.cond_scale1 * cond
-        x = x + self.attn(self.norm1(x))
-        x = x + self.cond_scale2 * cond
-        x = x + self.mlp(self.norm2(x))
-        return x * self.skip_scale + (1 - self.skip_scale) * x0
 
 
 # ============ UNet Components ============

@@ -77,18 +77,19 @@ class NCAConfigMedium(ConfigMedium):
 class Block(nn.Module):
     def __init__(self, dim, heads, rope_2d_grid_size=None):
         super().__init__()
+        self.norm1 = RMSNorm(dim)
         self.attn = Attention(dim, heads, rope_2d_grid_size=rope_2d_grid_size)
-        self.mlp = nn.Sequential(RMSNorm(dim),nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim))
-        self.cond_scale1 = nn.Parameter(torch.zeros(dim))
-        self.cond_scale2 = nn.Parameter(torch.zeros(dim))
-        self.skip_scale = nn.Parameter(torch.ones(1) * 0.1)
+        self.norm2 = RMSNorm(dim)
+        self.mlp = nn.Sequential(nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim))
+        self.cond_scale1 = nn.Parameter(torch.ones(dim) * 0.1)
+        self.cond_scale2 = nn.Parameter(torch.ones(dim) * 0.1)
+        self.skip_scale = nn.Parameter(torch.ones(1))
 
     def forward(self, x0, cond, attn_mask=None):
-        x = x0
-        x = x + self.cond_scale1 * cond
-        x = x + self.attn(x, attn_mask=attn_mask)
+        x = x0 + self.cond_scale1 * cond
+        x = x + self.attn(self.norm1(x), attn_mask=attn_mask)
         x = x + self.cond_scale2 * cond
-        x = x + self.mlp(x)
+        x = x + self.mlp(self.norm2(x))
         return x * self.skip_scale + (1-self.skip_scale) * x0
 
 
@@ -247,6 +248,7 @@ def train(config=None):
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
             #ema.update(model)
