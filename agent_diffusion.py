@@ -331,7 +331,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    train(Config())
+    #train(Config())
     train(ConfigMedium())
     train(NCAConfig())
     train(NCAConfigMedium())
