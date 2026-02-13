@@ -1,6 +1,6 @@
 """
-Minimal Diffusion Model for CIFAR-10 Generation
-Score-based diffusion with classifier-free guidance using a Transformer backbone.
+Minimal Flow Matching Model for CIFAR-10 Generation
+Rectified flow with classifier-free guidance using a Transformer backbone.
 """
 
 import math
@@ -11,11 +11,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from models import Diffusion, SinusoidalEmbedding, RMSNorm, EMA, Attention, make_neighborhood_mask
-from torch.utils.checkpoint import checkpoint
+from models import SinusoidalEmbedding, RMSNorm, EMA, Attention, make_neighborhood_mask
 
 torch.set_float32_matmul_precision('high')
 torch.backends.cudnn.benchmark = True
+
 
 class Config:
     # Model architecture
@@ -26,14 +26,11 @@ class Config:
     img_size = 32
     num_classes = 10
 
-    # Diffusion schedule
-    diff_timesteps = 1000
-    diff_beta_start = 1e-4
-    diff_beta_end = 0.02
-    diff_sample_steps = 100
+    # Sampling
+    sample_steps = 50
 
-    local_attn_dist = None # Neighborhood attention (None = full attention, int = Chebyshev radius)
-    rope_2d = False # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
+    local_attn_dist = None
+    rope_2d = False
 
     # Classifier-Free Guidance
     cfg_drop = 0.1
@@ -50,29 +47,17 @@ class Config:
 
     @property
     def patch_dim(self):
-        return self.patch_size ** 2 * 3 # num pixels x RGB
+        return self.patch_size ** 2 * 3
 
 
 class ConfigMedium(Config):
-    # Model architecture
     dim = 6 * 128
     depth = 12
     heads = 6
-
-    # Training
     batch_size = 512 * 4
     lr = 1e-4
     epochs = 300 * 4
-    lr_warmup_steps = 1000
-    ema_decay = 0.99
 
-class NCAConfig(Config):
-    local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
-    rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
-
-class NCAConfigMedium(ConfigMedium):
-    local_attn_dist = 2 # Neighborhood attention (None = full attention, int = Chebyshev radius)
-    rope_2d = True # 2D Rotary Position Embedding (replaces learned pos_embed in attention)
 
 class Block(nn.Module):
     def __init__(self, dim, heads, rope_2d_grid_size=None):
@@ -90,14 +75,13 @@ class Block(nn.Module):
         x = x + self.attn(self.norm1(x), attn_mask=attn_mask)
         x = x + self.cond_scale2 * cond
         x = x + self.mlp(self.norm2(x))
-        return x * self.skip_scale + (1-self.skip_scale) * x0
+        return x * self.skip_scale + (1 - self.skip_scale) * x0
 
 
 class DiT(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.diffusion = Diffusion(config.diff_timesteps, config.diff_beta_start, config.diff_beta_end, config.device)
 
         self.patch_embed = nn.Linear(config.patch_dim, config.dim)
         grid_size = config.img_size // config.patch_size
@@ -107,7 +91,6 @@ class DiT(nn.Module):
         self.time_embed = SinusoidalEmbedding(config.dim)
         self.class_embed = nn.Embedding(config.num_classes + 1, config.dim)
 
-        # Build neighborhood attention mask if configured
         attn_mask = None
         if config.local_attn_dist is not None:
             attn_mask = torch.from_numpy(make_neighborhood_mask(grid_size, config.local_attn_dist))
@@ -130,45 +113,39 @@ class DiT(nn.Module):
         return x.reshape(-1, g, g, 3, p, p).permute(0, 3, 1, 4, 2, 5).reshape(-1, 3, s, s)
 
     def forward(self, x_in, t, c):
+        """Predict velocity field. t is continuous in [0, 1]."""
         x = self.patch_embed(self.patchify(x_in))
         x = self.input_norm(x) + self.pos_embed
-        t_emb = self.time_embed(t)  # [B, dim]
-        c_emb = self.class_embed(c)  # [B, dim]
-        cond = (t_emb + c_emb).unsqueeze(1)  # [B, 1, dim]
+        # Scale t to [0, 1000] for sinusoidal embedding (same frequency range as DDPM)
+        t_emb = self.time_embed(t * 1000)
+        c_emb = self.class_embed(c)
+        cond = (t_emb + c_emb).unsqueeze(1)
         for block in self.blocks:
             x = block(x, cond, attn_mask=self.attn_mask)
-        x_pred = self.unpatchify(self.out(self.norm(x)))
-
-        return x_pred
+        return self.unpatchify(self.out(self.norm(x)))
 
     @torch.no_grad()
     def sample(self, class_ids, n_steps=None, guidance_scale=None):
-        """Sample images using DDIM with Classifier-Free Guidance."""
+        """Sample images using Euler integration with Classifier-Free Guidance."""
         config = self.config
-        n_steps = n_steps or config.diff_sample_steps
+        n_steps = n_steps or config.sample_steps
         guidance_scale = guidance_scale if guidance_scale is not None else config.cfg_scale
         B, device = len(class_ids), class_ids.device
         null_c = torch.full_like(class_ids, config.num_classes)
 
-        # Timesteps: T-1 -> 0 with n_steps+1 points (to have n_steps intervals)
-        steps = torch.linspace(config.diff_timesteps - 1, 0, n_steps + 1, dtype=torch.long, device=device)
-
-        # Init with pure noise
+        # Euler integration from t=1 (noise) to t=0 (data)
+        steps = torch.linspace(1, 0, n_steps + 1, device=device)
         x = torch.randn(B, 3, config.img_size, config.img_size, device=device)
 
-        # DDIM sampling
         for i in range(n_steps):
-            t, t_next = steps[i], steps[i + 1]
-            t_batch = torch.full((B,), t, dtype=torch.long, device=device)
+            t_batch = steps[i].expand(B)
+            v_cond = self.forward(x, t_batch, class_ids)
+            v_uncond = self.forward(x, t_batch, null_c)
+            v = v_uncond + guidance_scale * (v_cond - v_uncond)
+            dt = steps[i] - steps[i + 1]
+            x = x - dt * v
 
-            # Predict noise with CFG
-            eps_cond = self.forward(x, t_batch, class_ids)
-            eps_uncond = self.forward(x, t_batch, null_c)
-            eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
-
-            x = self.diffusion.ddim_step(x, eps, t, t_next)
-
-        return x
+        return x.clamp(-1, 1)
 
 
 def train(config=None):
@@ -190,10 +167,9 @@ def train(config=None):
     )
 
     model = DiT(config).to(config.device)
-    #model = torch.compile(model)
 
     norm_params = [p for n, p in model.named_parameters() if 'scale' in n or 'norm' in n]
-    embed_params = [p for n, pc in model.named_parameters() if 'embed' in n]
+    embed_params = [p for n, p in model.named_parameters() if 'embed' in n]
     other_params = [p for n, p in model.named_parameters()
                     if not any(x in n for x in ['scale', 'norm', 'embed'])]
 
@@ -234,17 +210,24 @@ def train(config=None):
             imgs = imgs.to(config.device, non_blocking=True)
             labels = labels.to(config.device, non_blocking=True)
 
-            t = torch.randint(0, config.diff_timesteps, (imgs.shape[0],), device=config.device)
+            # Flow matching: sample continuous t ~ U(0,1)
+            t = torch.rand(imgs.shape[0], device=config.device)
 
-            # Classifier-Free Guidance: randomly drop class labels during training
+            # CFG: randomly drop class labels
             drop = torch.rand(labels.shape[0], device=config.device) < config.cfg_drop
             labels = torch.where(drop, config.num_classes, labels)
 
-            # forward pass where we get the noisy image and the noise
-            xt, noise = model.diffusion.diffuse(imgs, t)
+            # Linear interpolation: x_t = (1-t)*x_0 + t*noise
+            noise = torch.randn_like(imgs)
+            t_view = t[:, None, None, None]
+            x_t = (1 - t_view) * imgs + t_view * noise
+
+            # Target velocity: d(x_t)/dt = noise - x_0
+            target = noise - imgs
+
             with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-                noise_pred = model(xt, t, labels)
-                loss = F.mse_loss(noise_pred, noise)
+                v_pred = model(x_t, t, labels)
+                loss = F.mse_loss(v_pred, target)
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -260,7 +243,6 @@ def train(config=None):
         loss_history.append(avg_loss)
         train_time = time.time() - epoch_start
 
-        # Show samples every 5 epochs
         if (epoch + 1) % 5 == 0 or epoch == 0:
             model.eval()
             sample_classes = torch.tensor([0, 1, 2, 3, 4, 5], device=config.device)
@@ -268,7 +250,6 @@ def train(config=None):
                 samples = model.sample(sample_classes)
             samples = ((samples + 1) * 127.5).clamp(0, 255).to(torch.uint8).cpu().numpy()
 
-            # Show 5 images in first 5 subplots
             for idx in range(5):
                 ax = axes.flat[idx]
                 ax.clear()
@@ -277,11 +258,9 @@ def train(config=None):
                 ax.set_title(f"{class_names[sample_classes[idx]]}")
                 ax.axis("off")
 
-            # Loss curve in last subplot
             ax = axes.flat[5]
             ax.clear()
             ax.plot(loss_history, 'b-', linewidth=1)
-            ax.set_ylim([0.01,0.06])
             ax.set_xlabel('epoch')
             ax.set_ylabel('loss')
             ax.set_title('loss')
@@ -294,14 +273,13 @@ def train(config=None):
 
         print(f"Epoch {epoch + 1:3d}/{config.epochs} | Loss: {avg_loss:.4f} | Time: {train_time:.1f}s")
 
-
     ema.apply(model)
     torch.save({
         "model": model.state_dict(),
         "config_name": type(config).__name__,
         "config": {k: v for k, v in vars(config).items() if not k.startswith("_")},
-    }, f"diffusion_cifar10_{type(config).__name__}.pth")
-    print(f"Saved: diffusion_cifar10_{type(config).__name__}.pth")
+    }, f"flow_cifar10_{type(config).__name__}.pth")
+    print(f"Saved: flow_cifar10_{type(config).__name__}.pth")
 
     plt.ioff()
     plt.close(fig)
@@ -310,17 +288,15 @@ def train(config=None):
 
 class Agent:
     def __init__(self):
-        checkpoint = torch.load("diffusion_cifar10.pth", map_location="cpu", weights_only=False)
-        self.config = Config() # load default will be overloaded
+        checkpoint = torch.load("flow_cifar10.pth", map_location="cpu", weights_only=False)
+        self.config = Config()
         for k, v in checkpoint["config"].items():
             setattr(self.config, k, v)
         self.config.device = "cpu"
         self.model = DiT(self.config).to(self.config.device)
-        # Strip _orig_mod. prefix from compiled model checkpoint
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in checkpoint["model"].items()}
         self.model.load_state_dict(state_dict)
         self.model.eval()
-
 
     def generate(self, class_ids: np.ndarray) -> np.ndarray:
         c = torch.from_numpy(class_ids).long().to(self.config.device)
@@ -331,7 +307,4 @@ class Agent:
 
 
 if __name__ == "__main__":
-    #train(Config())
-    train(ConfigMedium())
-    train(NCAConfig())
-    train(NCAConfigMedium())
+    train(Config())
