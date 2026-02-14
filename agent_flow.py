@@ -287,11 +287,12 @@ def train(config=None):
 
 
 class Agent:
+    CONFIG_CLASSES = {cls.__name__: cls for cls in [Config, ConfigMedium]}
+
     def __init__(self, model_path="flow_cifar10.pth"):
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
-        self.config = Config()
-        for k, v in checkpoint["config"].items():
-            setattr(self.config, k, v)
+        config_name = checkpoint.get("config_name", "Config")
+        self.config = self.CONFIG_CLASSES.get(config_name, Config)()
         self.config.device = "cpu"
         self.model = DiT(self.config).to(self.config.device)
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in checkpoint["model"].items()}
