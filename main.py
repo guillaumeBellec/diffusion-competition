@@ -23,7 +23,7 @@ def load_agent(model_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Test CIFAR-10 generation agent")
-    parser.add_argument("model", help="Path to model checkpoint (.pth)")
+    parser.add_argument("--model", required=True, help="Path to model checkpoint (.pth)")
     args = parser.parse_args()
 
     env = Env()
