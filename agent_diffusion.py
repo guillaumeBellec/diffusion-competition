@@ -193,7 +193,7 @@ def train(config=None):
     #model = torch.compile(model)
 
     norm_params = [p for n, p in model.named_parameters() if 'scale' in n or 'norm' in n]
-    embed_params = [p for n, pc in model.named_parameters() if 'embed' in n]
+    embed_params = [p for n, p in model.named_parameters() if 'embed' in n]
     other_params = [p for n, p in model.named_parameters()
                     if not any(x in n for x in ['scale', 'norm', 'embed'])]
 
@@ -331,7 +331,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    #train(Config())
-    train(ConfigMedium())
-    train(NCAConfig())
-    train(NCAConfigMedium())
+    train(Config())
+    #train(ConfigMedium())
+    #train(NCAConfig())
+    #train(NCAConfigMedium())
