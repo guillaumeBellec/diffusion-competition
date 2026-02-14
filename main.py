@@ -1,20 +1,33 @@
 """
 Main script to test the CIFAR-10 generation competition locally.
+Usage: python main.py <model_file.pth>
 """
 
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
 from env import Env
-from agent_diffusion import Agent
-from agent_diffusion_UNet import Agent
-#from agent_example import Agent
+
+
+def load_agent(model_path):
+    """Load the correct agent class based on the model filename."""
+    if model_path.startswith("flow_"):
+        from agent_flow import Agent
+    elif model_path.startswith("diffusion_UNet_"):
+        from agent_diffusion_UNet import Agent
+    else:
+        from agent_diffusion import Agent
+    return Agent(model_path)
 
 
 def main():
-    # Create environment and agent
+    parser = argparse.ArgumentParser(description="Test CIFAR-10 generation agent")
+    parser.add_argument("model", help="Path to model checkpoint (.pth)")
+    args = parser.parse_args()
+
     env = Env()
-    agent = Agent()
+    agent = load_agent(args.model)
 
     # Wrap agent in list (as expected by env.evaluate)
     agents = [agent]

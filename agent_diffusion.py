@@ -309,8 +309,8 @@ def train(config=None):
 
 
 class Agent:
-    def __init__(self):
-        checkpoint = torch.load("diffusion_cifar10.pth", map_location="cpu", weights_only=False)
+    def __init__(self, model_path="diffusion_cifar10.pth"):
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
         self.config = Config() # load default will be overloaded
         for k, v in checkpoint["config"].items():
             setattr(self.config, k, v)
