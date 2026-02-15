@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from models import SinusoidalEmbedding, RMSNorm, EMA, Attention, make_neighborhood_mask
 
+import torch_fidelity
+
 torch.set_float32_matmul_precision('high')
 torch.backends.cudnn.benchmark = True
 
@@ -148,6 +150,37 @@ class DiT(nn.Module):
         return x.clamp(-1, 1)
 
 
+@torch.no_grad()
+def compute_fid(model, n_images=1024, batch_size=128):
+    """Compute FID against CIFAR-10 train set using torch-fidelity."""
+    config = model.config
+    device = next(model.parameters()).device
+    # Generate images in batches
+    all_imgs = []
+    class_ids = torch.arange(config.num_classes, device=device)
+    for i in range(0, n_images, batch_size):
+        n = min(batch_size, n_images - i)
+        c = class_ids[torch.randint(config.num_classes, (n,), device=device)]
+        imgs = model.sample(c)
+        imgs = ((imgs + 1) * 127.5).clamp(0, 255).to(torch.uint8).cpu()
+        all_imgs.append(imgs)
+    all_imgs = torch.cat(all_imgs)
+
+    # Wrap as dataset for torch-fidelity
+    class TensorDataset(torch.utils.data.Dataset):
+        def __init__(self, tensor): self.tensor = tensor
+        def __len__(self): return len(self.tensor)
+        def __getitem__(self, i): return self.tensor[i]
+
+    metrics = torch_fidelity.calculate_metrics(
+        input1=TensorDataset(all_imgs),
+        input2="cifar10-train",
+        cuda=device.type == "cuda",
+        fid=True, verbose=False,
+    )
+    return metrics["frechet_inception_distance"]
+
+
 def train(config=None):
     import matplotlib.pyplot as plt
 
@@ -270,6 +303,13 @@ def train(config=None):
             fig.canvas.draw()
             fig.canvas.flush_events()
             plt.pause(0.1)
+
+        # FID evaluation every 50 epochs
+        if (epoch + 1) % 50 == 0:
+            model.eval()
+            fid_model = compute_fid(model)
+            fid_ema = compute_fid(ema.shadow)
+            print(f"  FID model: {fid_model:.1f} | FID ema: {fid_ema:.1f}")
 
         print(f"Epoch {epoch + 1:3d}/{config.epochs} | Loss: {avg_loss:.4f} | Time: {train_time:.1f}s")
 

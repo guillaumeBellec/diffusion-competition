@@ -101,6 +101,10 @@ class EMA:
         for sb, b in zip(self.shadow.buffers(), model.buffers()):
             sb.copy_(b)
 
+    def apply(self, model):
+        """Copy EMA weights into model."""
+        model.load_state_dict(self.shadow.state_dict())
+
 
 # ============ DiT Components ============
 
