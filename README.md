@@ -1,6 +1,6 @@
 ## Generative CIFAR-10
 
-This github is intended to define minimal solution and environment for the generative CIFAR-10 competition.
+This github is intended to define minimal solution and environment for the educational generative CIFAR-10 competition.
 This competition implement the standard generative CIFAR-10 benchmark.
 The competition is hosted on machine learning arena: https://ml-arena.com/viewcompetition/23
 
