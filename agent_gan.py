@@ -22,10 +22,10 @@ class Config:
     d_dim = 128        # discriminator base channels
 
     # Training
-    batch_size = 128
+    batch_size = 512
     lr_g = 2e-4
     lr_d = 2e-4
-    epochs = 200
+    epochs = 300
     n_critic = 1       # discriminator steps per generator step
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
