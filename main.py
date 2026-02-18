@@ -56,8 +56,10 @@ def main():
         ax.set_title(f"Class: {class_names[class_ids[idx]]}")
         ax.axis("off")
 
+    model_name = args.model.replace(".pth", "")
+    fig.suptitle(f"{model_name} | FID: {fid_score:.2f}", fontsize=12)
     plt.tight_layout()
-    plt.savefig(f"sample_fid_{fid_score:.2f}.png")
+    plt.savefig(f"sample_{model_name}_fid_{fid_score:.2f}.png")
     plt.show()
 
 
