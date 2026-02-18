@@ -16,6 +16,8 @@ def load_agent(model_path):
         from agent_flow import Agent
     elif model_path.startswith("diffusion_UNet_"):
         from agent_diffusion_UNet import Agent
+    elif model_path.startswith("gan_"):
+        from agent_gan import Agent
     else:
         from agent_diffusion import Agent
     return Agent(model_path)
