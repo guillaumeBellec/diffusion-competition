@@ -2,7 +2,7 @@
 CIFAR-10 Image Generation Competition Environment
 
 Evaluates agents on their ability to generate class-conditional CIFAR-10 images.
-Score is computed using FID (Fréchet Inception Distance) against the test set.
+Score is computed using ResNetFID (Fréchet distance in ResNet18 feature space) against the test set.
 """
 
 import pickle
@@ -13,7 +13,7 @@ from eval import ResNetFID
 
 class Env:
     def __init__(self):
-        """Load CIFAR-10 test set and initialize FID metric."""
+        """Load CIFAR-10 test set and initialize ResNetFID metric."""
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.num_images = 1024
         self.batch_size = 64
@@ -45,7 +45,7 @@ class Env:
         return [all_class_ids[i*self.batch_size:(i+1)*self.batch_size] for i in range(num_batches)]
 
     def evaluate(self, agents: list, agent_infos: list) -> dict:
-        """Evaluate agent on CIFAR-10 generation using FID."""
+        """Evaluate agent on CIFAR-10 generation using ResNetFID."""
         results = []
         agent = agents[0]
 
@@ -60,7 +60,7 @@ class Env:
             results.append({
                 "agent_index": 0,
                 "score": -fid_score,
-                "info_message": f"FID: {fid_score:.2f}"
+                "info_message": f"ResNetFID: {fid_score:.2f}"
             })
         except Exception as e:
             results.append({

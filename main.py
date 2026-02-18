@@ -14,7 +14,7 @@ def load_agent(model_path):
     """Load the correct agent class based on the model filename."""
     if model_path.startswith("flow_"):
         from agent_flow import Agent
-    elif model_path.startswith("diffusion_UNet_"):
+    elif model_path.startswith("diffusion_unet_"):
         from agent_diffusion_UNet import Agent
     elif model_path.startswith("gan_"):
         from agent_gan import Agent
@@ -39,7 +39,7 @@ def main():
     print("Running evaluation...")
     results = env.evaluate(agents, agent_infos)
     fid_score = -results["agent_results"][0]["score"]
-    print(f"\nFID: {fid_score:.2f}")
+    print(f"\nResNetFID: {fid_score:.2f}")
 
     # Generate and plot 3 sample images
     class_ids = np.array([0, 1, 2], dtype=np.int32)  # airplane, automobile, bird
@@ -57,9 +57,9 @@ def main():
         ax.axis("off")
 
     model_name = args.model.replace(".pth", "")
-    fig.suptitle(f"{model_name} | FID: {fid_score:.2f}", fontsize=12)
+    fig.suptitle(f"{model_name} | ResNetFID: {fid_score:.2f}", fontsize=12)
     plt.tight_layout()
-    plt.savefig(f"sample_{model_name}_fid_{fid_score:.2f}.png")
+    plt.savefig(f"sample_{model_name}_ResNetFID_{fid_score:.2f}.png")
     plt.show()
 
 
